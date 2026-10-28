@@ -1,4 +1,4 @@
-/*! Barry guía — Tecno Ofertas · v1.1 (27/10/2026)
+/*! Barry guía — Tecno Ofertas · v1.2 (27/10/2026, con notas de auditoría)
  * Mascota que guía la compra en la PÁGINA DE PRODUCTO de la Tienda Nube (no entra al pago).
  * No lee formularios, no guarda datos del cliente, no manda nada a ningún lado.
  * En el navegador del cliente guarda sólo: dónde lo dejó (barryGuiaPos) y si lo escondió (barryGuiaChau, por sesión).
@@ -40,6 +40,7 @@ var css = ''
 + '#bg-barry{position:fixed;z-index:9990;left:8px;bottom:8px;width:96px;height:136px;pointer-events:none;font-family:inherit;'
 + 'transition:transform .45s cubic-bezier(.3,1.4,.5,1),opacity .3s,left .35s ease,bottom .35s ease}'
 + '#bg-barry.bg-fuera{transform:translateY(160%)}#bg-barry.bg-cede{opacity:.28}#bg-barry.bg-cede *{pointer-events:none!important}'
++ '#bg-barry.bg-modal,#bg-llamar.bg-modal{opacity:0!important;pointer-events:none!important}#bg-barry.bg-modal *{pointer-events:none!important}'
 + '#bg-barry.bg-arr{transition:none}#bg-barry.bg-arr .bg-cuerpo{transform:scale(1.08) rotate(-4deg);cursor:grabbing}'
 + '#bg-barry .bg-cuerpo{position:relative;width:96px;height:136px;pointer-events:auto;cursor:grab;touch-action:none;transition:transform .15s;'
 + 'filter:drop-shadow(0 6px 8px rgba(0,0,0,.18));-webkit-user-select:none;user-select:none;outline-offset:3px}'
@@ -161,7 +162,7 @@ function puntaje(x, ab, c){
   return {s: duro*60 + gd*40 + blando*.4 + dist + tapado, duro: duro, gd: gd + (tapado ? 1 : 0), lado: lado};
 }
 function ubicar(forzar){
-  if (escondido || barry.classList.contains('bg-arr')) return;
+  if (escondido || barry.classList.contains('bg-arr') || enModal) return;
   var c = cajas(), ahora = puntaje(cur.x, cur.ab, c);
   if (!forzar && ahora.duro === 0 && ahora.gd === 0) { barry.classList.remove('bg-cede'); return; }
   var maxAb = Math.max(M, innerHeight - topeArriba() - AL), mejor = null;
@@ -173,16 +174,18 @@ function ubicar(forzar){
   barry.classList.toggle('bg-cede', mejor.duro > 0);
 }
 function pintar(lado){ barry.classList.toggle('bg-der', lado === 'der'); barry.style.left = cur.x + 'px'; barry.style.bottom = cur.ab + 'px'; }
-var tS = 0, ultRev = 0, revPend = 0;
+var tS = 0, ultRev = 0, revPend = 0, ultScroll = 0, enModal = false, intentoCede = false;
 function revisarAlDeslizar(){
   revPend = 0; ultRev = Date.now();
+  if (enModal) return;
   if (!escondido) barry.classList.toggle('bg-cede', puntaje(cur.x, cur.ab, cajas()).duro > 0);
   else if (!llamar.hidden) ubicarLlamar();
 }
 addEventListener('scroll', function(){
   var falta = 150 - (Date.now() - ultRev);
   if (!revPend) revPend = setTimeout(revisarAlDeslizar, Math.max(0, falta));
-  clearTimeout(tS); tS = setTimeout(function(){ if (escondido) ubicarLlamar(); else ubicar(false); }, 600);
+  ultScroll = Date.now(); intentoCede = false;
+  clearTimeout(tS); tS = setTimeout(function(){ if (enModal) return; if (escondido) ubicarLlamar(); else ubicar(false); }, 600);
 }, {passive:true});
 addEventListener('resize', function(){ clearTimeout(tS); tS = setTimeout(function(){ ubicar(true); }, 150); });
 
@@ -272,11 +275,20 @@ function hayModal(){
   return n >= 2;
 }
 function despuesDelModal(fn){
-  setTimeout(function(){ var vueltas = 0; (function esperar(){ if (hayModal() && vueltas++ < 240) return setTimeout(esperar, 500); fn(); })(); }, 450);
+  setTimeout(function(){ var vueltas = 0; (function esperar(){ if ((enModal || hayModal()) && vueltas++ < 240) return setTimeout(esperar, 500); fn(); })(); }, 450);
 }
 
+// vigía cada 0,7 s: foto en pantalla completa → Barry se va; al cerrarla → vuelve a un lugar libre.
+// y si quedó transparente sin que nadie esté deslizando, se reubica (así nunca queda trabado)
 setInterval(function(){
-  if (!avisoIdle && !escondido && !(gAcc.children.length && !globo.hidden) && Date.now() - ultimo > 25000) { avisoIdle = true; toma('busca'); decir('¿Seguís por acá? Más abajo está la ficha técnica completa.'); }
+  if (!barry.isConnected) return;
+  var m = hayModal();
+  if (m && !enModal) { enModal = true; barry.classList.add('bg-modal'); llamar.classList.add('bg-modal'); clearTimeout(tS); }
+  else if (!m && enModal) { enModal = false; barry.classList.remove('bg-modal', 'bg-cede'); llamar.classList.remove('bg-modal'); if (escondido) ubicarLlamar(); else ubicar(true); }
+  else if (!m && !escondido && barry.classList.contains('bg-cede') && !intentoCede && Date.now() - ultScroll > 900) { intentoCede = true; ubicar(false); }
+}, 700);
+setInterval(function(){
+  if (!avisoIdle && !escondido && !enModal && !(gAcc.children.length && !globo.hidden) && Date.now() - ultimo > 25000) { avisoIdle = true; toma('busca'); decir('¿Seguís por acá? Más abajo está la ficha técnica completa.'); }
 }, 5000);
 ['pointerdown','wheel','keydown','touchmove'].forEach(function(ev){ document.addEventListener(ev, toque, {passive:true}); });
 
